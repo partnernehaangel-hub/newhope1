@@ -102,7 +102,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import { toPng, toJpeg } from 'html-to-image';
-import { downloadIDCardPDF, downloadBatchIDCardsPDF } from './utils/pdfGenerator';
+import { downloadIDCardPDF, downloadBatchIDCardsPDF, downloadA4GridIDCardsPDF, getUniquePeople } from './utils/pdfGenerator';
 import * as JSZipModule from 'jszip';
 const JSZip = ((JSZipModule as any).default || JSZipModule) as any;
 import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode';
@@ -16855,6 +16855,20 @@ const withTimeout = (promise: Promise<any>, timeoutMs: number = 30000) => {
   });
 };
 
+const safeQuery = async (queryPromise: PromiseLike<any>, timeoutMs: number = 15000): Promise<any> => {
+  try {
+    let timeoutId: any;
+    const timeoutPromise = new Promise((resolve) => {
+      timeoutId = setTimeout(() => resolve({ data: null, error: new Error('Query timeout') }), timeoutMs);
+    });
+    const res = await Promise.race([queryPromise, timeoutPromise]);
+    clearTimeout(timeoutId);
+    return res || { data: null, error: null };
+  } catch (err) {
+    return { data: null, error: err };
+  }
+};
+
 export default function App() {
 
   // Supabase Data Fetching
@@ -17885,12 +17899,12 @@ const schoolMigrations = `
       return;
     }
     try {
-      // 1. Fetch only essential login tables first for instant startup (6-second timeout)
-      const [usersRes, profileRes, sessionsRes] = await withTimeout(Promise.all([
-        supabase.from('users').select('*'),
-        supabase.from('school_profile').select('*'),
-        supabase.from('academic_sessions').select('year')
-      ]), 30000) as any;
+      // 1. Fetch only essential login tables first for instant startup
+      const [usersRes, profileRes, sessionsRes] = await Promise.all([
+        safeQuery(supabase.from('users').select('*'), 10000),
+        safeQuery(supabase.from('school_profile').select('*'), 10000),
+        safeQuery(supabase.from('academic_sessions').select('year'), 10000)
+      ]) as any;
 
       // 1. Process Users
       const usersData = usersRes.data;
@@ -17968,7 +17982,7 @@ const schoolMigrations = `
       // Set initial loaded state to true after all data has loaded
       setIsInitialDataLoaded(true);
     } catch (err: any) {
-      console.error('Error in fetchAllData:', err);
+      console.warn('Note in fetchAllData:', err);
       setIsInitialDataLoaded(true); // Fallback so app is still usable
     }
   }
@@ -17978,6 +17992,47 @@ const schoolMigrations = `
     try {
       const tables = ['categories', 'castes', 'religions', 'titles', 'classes', 'sections', 'subjects', 'genders', 'departments', 'designations'];
       
+      const queries = [
+        supabase.from('enquiries').select('*').order('created_at', { ascending: false }),
+        supabase.from('visitors').select('*').order('created_at', { ascending: false }),
+        supabase.from('complaints').select('*').order('created_at', { ascending: false }),
+        supabase.from('income_heads').select('*'),
+        supabase.from('expense_heads').select('*'),
+        supabase.from('incomes').select('*'),
+        supabase.from('expenses').select('*'),
+        supabase.from('departments').select('*'),
+        supabase.from('designations').select('*'),
+        supabase.from('camera_settings').select('*'),
+        supabase.from('students').select('*'),
+        supabase.from('fee_types').select('*'),
+        supabase.from('fee_master').select('*'),
+        supabase.from('fee_collections').select('*'),
+        supabase.from('contra_entries').select('*').order('created_at', { ascending: false }),
+        supabase.from('staff').select('*'),
+        supabase.from('staff_leave_requests').select('*'),
+        supabase.from('staff_attendance').select('*').order('attendance_date', { ascending: false }),
+        supabase.from('notices').select('*').order('date', { ascending: false }),
+        supabase.from('communication_templates').select('*'),
+        supabase.from('time_table').select('*'),
+        supabase.from('teacher_assignments').select('*'),
+        supabase.from('syllabus').select('*'),
+        supabase.from('homework').select('*'),
+        supabase.from('student_attendance').select('*').order('created_at', { ascending: false }),
+        supabase.from('exams').select('*'),
+        supabase.from('exam_schedules').select('*'),
+        supabase.from('exam_results').select('*'),
+        supabase.from('report_card_templates').select('*'),
+        supabase.from('report_cards').select('*'),
+        supabase.from('hostel_rooms').select('*'),
+        supabase.from('hostel_staff').select('*'),
+        supabase.from('hostel_beds').select('*'),
+        supabase.from('hostel_attendance').select('*'),
+        supabase.from('calendar_events').select('*'),
+        ...tables.map(table => supabase!.from(table).select('name'))
+      ];
+
+      const results = await Promise.all(queries.map(q => safeQuery(q, 15000))) as any;
+
       const [
         enquiriesRes,
         visitorsRes,
@@ -18015,44 +18070,7 @@ const schoolMigrations = `
         hAttendanceRes,
         cEventsRes,
         ...masterResults
-      ] = await withTimeout(Promise.all([
-        supabase.from('enquiries').select('*').order('created_at', { ascending: false }),
-        supabase.from('visitors').select('*').order('created_at', { ascending: false }),
-        supabase.from('complaints').select('*').order('created_at', { ascending: false }),
-        supabase.from('income_heads').select('*'),
-        supabase.from('expense_heads').select('*'),
-        supabase.from('incomes').select('*'),
-        supabase.from('expenses').select('*'),
-        supabase.from('departments').select('*'),
-        supabase.from('designations').select('*'),
-        supabase.from('camera_settings').select('*'),
-        supabase.from('students').select('*'),
-        supabase.from('fee_types').select('*'),
-        supabase.from('fee_master').select('*'),
-        supabase.from('fee_collections').select('*'),
-        supabase.from('contra_entries').select('*').order('created_at', { ascending: false }),
-        supabase.from('staff').select('*'),
-        supabase.from('staff_leave_requests').select('*'),
-        supabase.from('staff_attendance').select('*').order('attendance_date', { ascending: false }),
-        supabase.from('notices').select('*').order('date', { ascending: false }),
-        supabase.from('communication_templates').select('*'),
-        supabase.from('time_table').select('*'),
-        supabase.from('teacher_assignments').select('*'),
-        supabase.from('syllabus').select('*'),
-        supabase.from('homework').select('*'),
-        supabase.from('student_attendance').select('*').order('created_at', { ascending: false }),
-        supabase.from('exams').select('*'),
-        supabase.from('exam_schedules').select('*'),
-        supabase.from('exam_results').select('*'),
-        supabase.from('report_card_templates').select('*'),
-        supabase.from('report_cards').select('*'),
-        supabase.from('hostel_rooms').select('*'),
-        supabase.from('hostel_staff').select('*'),
-        supabase.from('hostel_beds').select('*'),
-        supabase.from('hostel_attendance').select('*'),
-        supabase.from('calendar_events').select('*'),
-        ...tables.map(table => supabase!.from(table).select('name'))
-      ]), 30000) as any;
+      ] = results;
 
       // 2. Process Front Office Data
       const enquiriesData = enquiriesRes.data;
@@ -18584,7 +18602,7 @@ const schoolMigrations = `
       })));
 
     } catch (err) {
-      console.error('Error fetching remaining background data:', err);
+      console.warn('Background data sync note:', err);
     }
   }
 
@@ -25275,6 +25293,7 @@ const IDCardsModule = ({
 
   const [idTemplate, setIdTemplate] = useState<string>('classic');
   const [printPeople, setPrintPeople] = useState<any[] | null>(null);
+  const [a4GridPrintPeople, setA4GridPrintPeople] = useState<any[] | null>(null);
 
   const handlePrintSingle = (person: any) => {
     if (!person) return;
@@ -25283,6 +25302,71 @@ const IDCardsModule = ({
       window.print();
       setPrintPeople(null);
     }, 200);
+  };
+
+  const handleDownloadA4GridPDF = async () => {
+    const isIdCard = ['student', 'teacher', 'hostel'].includes(activeTab);
+    if (!isIdCard) {
+      alert('A4 Grid PDF generation is supported for ID Cards (Students, Staff, and Hostel Cards).');
+      return;
+    }
+
+    const uniqueList = getUniquePeople(filteredPeople);
+    if (uniqueList.length === 0) {
+      alert('No unique students or staff found matching the selected filter.');
+      return;
+    }
+
+    setGenerationProgress({
+      active: true,
+      current: 0,
+      total: uniqueList.length,
+      message: 'Initializing A4 4-Card Grid PDF engine...'
+    });
+
+    try {
+      const cardType = activeTab as 'student' | 'teacher' | 'hostel';
+      await downloadA4GridIDCardsPDF(
+        uniqueList,
+        cardType,
+        orientation,
+        {
+          name: schoolProfile?.name || 'SUBRAI MISSION CONVENT SCHOOL',
+          address: schoolProfile?.address || '',
+          contact: schoolProfile?.contact || '',
+          logo: schoolProfile?.logo || '',
+          principalSignature: schoolProfile?.principalSignature || '',
+          currentSession: schoolProfile?.currentSession || '2023-24',
+        },
+        (current, total, msg) => {
+          setGenerationProgress({
+            active: true,
+            current,
+            total,
+            message: msg
+          });
+        }
+      );
+    } catch (error: any) {
+      console.error('A4 Grid generation error:', error);
+      alert(`Error generating A4 Grid PDF: ${error.message || error}`);
+    } finally {
+      setGenerationProgress(null);
+    }
+  };
+
+  const handlePrintA4Grid = () => {
+    const uniqueList = getUniquePeople(filteredPeople);
+    if (uniqueList.length === 0) {
+      alert('No unique students or staff found matching the selected filter.');
+      return;
+    }
+
+    setA4GridPrintPeople(uniqueList);
+    setTimeout(() => {
+      window.print();
+      setA4GridPrintPeople(null);
+    }, 300);
   };
 
   const [generationProgress, setGenerationProgress] = useState<{ active: boolean; current: number; total: number; message: string } | null>(null);
@@ -25575,33 +25659,63 @@ const IDCardsModule = ({
               )}
 
               {['student', 'teacher', 'hostel'].includes(activeTab) && (
-                <div className="pt-2 border-t border-slate-100 space-y-2">
+                <div className="pt-3 border-t border-slate-100 space-y-2.5">
+                  <div className="bg-emerald-50 border border-emerald-200/80 rounded-xl p-2.5 text-center">
+                    <span className="text-[11px] font-black text-emerald-900 uppercase tracking-wider block">
+                      A4 Sheet Provision (4 Cards / Page)
+                    </span>
+                    <span className="text-[10px] text-emerald-700 font-bold block mt-0.5">
+                      {getUniquePeople(filteredPeople).length} Unique Person{getUniquePeople(filteredPeople).length !== 1 ? 's' : ''} • {Math.ceil(getUniquePeople(filteredPeople).length / 4)} A4 Sheet{Math.ceil(getUniquePeople(filteredPeople).length / 4) !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+
                   <button
-                    onClick={handleDownloadBatchPDF}
-                    className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-4 rounded-xl font-bold text-xs shadow-md hover:scale-[1.01] transition-all cursor-pointer"
-                    title="Download all filtered cards as a single multi-page PDF"
+                    onClick={handleDownloadA4GridPDF}
+                    className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-4 rounded-xl font-black text-xs shadow-md hover:scale-[1.01] transition-all cursor-pointer"
+                    title="Download A4 paper size PDF with 4 ID cards per page (unique items only)"
                   >
-                    <Download size={14} />
-                    Download Filtered Batch ({filteredPeople.length})
+                    <FolderDown size={15} />
+                    Download A4 PDF Grid (4 Cards/Page)
                   </button>
+
                   <button
-                    onClick={() => {
-                      if (filteredPeople.length === 0) {
-                        alert('No students or staff found matching the selected filter.');
-                        return;
-                      }
-                      setPrintPeople(filteredPeople);
-                      setTimeout(() => {
-                        window.print();
-                        setPrintPeople(null);
-                      }, 250);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary/95 text-white py-3 px-4 rounded-xl font-bold text-xs shadow-md hover:scale-[1.01] transition-all cursor-pointer"
-                    title="Print all filtered cards natively at high resolution"
+                    onClick={handlePrintA4Grid}
+                    className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-4 rounded-xl font-black text-xs shadow-md hover:scale-[1.01] transition-all cursor-pointer"
+                    title="Print A4 sheet directly with 4 ID cards per page"
                   >
-                    <Printer size={14} />
-                    Print Filtered Batch ({filteredPeople.length})
+                    <Printer size={15} />
+                    Print A4 Grid (4 Cards/Page)
                   </button>
+
+                  <div className="pt-2 border-t border-slate-100 flex gap-2">
+                    <button
+                      onClick={handleDownloadBatchPDF}
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-slate-700 hover:bg-slate-800 text-white py-2 px-2 rounded-lg font-bold text-[11px] cursor-pointer"
+                      title="Download single card per page batch PDF"
+                    >
+                      <Download size={12} />
+                      1 Card/Page PDF
+                    </button>
+                    <button
+                      onClick={() => {
+                        const uniqueList = getUniquePeople(filteredPeople);
+                        if (uniqueList.length === 0) {
+                          alert('No students or staff found matching the selected filter.');
+                          return;
+                        }
+                        setPrintPeople(uniqueList);
+                        setTimeout(() => {
+                          window.print();
+                          setPrintPeople(null);
+                        }, 250);
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 py-2 px-2 rounded-lg font-bold text-[11px] cursor-pointer"
+                      title="Print single cards natively"
+                    >
+                      <Printer size={12} />
+                      1 Card Print
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -25826,6 +25940,87 @@ const IDCardsModule = ({
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* High-Fidelity Native Browser Print Container for A4 4-Card Sheet Grid */}
+      {a4GridPrintPeople && (
+        <div className="print-a4-grid-container">
+          <style>{`
+            @media print {
+              #root > *:not(.print-a4-grid-container) {
+                display: none !important;
+              }
+              html, body {
+                background-color: white !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                color-adjust: exact !important;
+              }
+              @page {
+                size: A4 portrait;
+                margin: 0 !important;
+              }
+              .print-a4-grid-container {
+                display: block !important;
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                background: white !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                color-adjust: exact !important;
+              }
+              .a4-grid-sheet {
+                width: 210mm !important;
+                height: 297mm !important;
+                page-break-after: always !important;
+                break-after: page !important;
+                padding: 10mm !important;
+                box-sizing: border-box !important;
+                display: grid !important;
+                grid-template-columns: 1fr 1fr !important;
+                grid-template-rows: 1fr 1fr !important;
+                gap: 8mm !important;
+                align-items: center !important;
+                justify-items: center !important;
+                overflow: hidden !important;
+                background-color: white !important;
+              }
+              .a4-grid-card-wrapper {
+                zoom: 0.82 !important;
+                display: flex !important;
+                justify-content: center !important;
+                align-items: center !important;
+              }
+            }
+            @media screen {
+              .print-a4-grid-container {
+                display: none !important;
+              }
+            }
+          `}</style>
+          {Array.from({ length: Math.ceil(a4GridPrintPeople.length / 4) }).map((_, pageIdx) => {
+            const pageBatch = a4GridPrintPeople.slice(pageIdx * 4, (pageIdx + 1) * 4);
+            return (
+              <div key={pageIdx} className="a4-grid-sheet">
+                {pageBatch.map((person: any, idx: number) => (
+                  <div key={person.id || person.studentId || idx} className="a4-grid-card-wrapper border border-dashed border-slate-300 p-2 rounded-2xl bg-white shadow-none">
+                    {activeTab === 'teacher' ? (
+                      <IDCard person={person} type="teacher" orientation={orientation} template={idTemplate} />
+                    ) : (
+                      <IDCard person={person} type="student" orientation={orientation} template={idTemplate} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

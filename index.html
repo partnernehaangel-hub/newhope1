@@ -62,9 +62,10 @@
           reasonStr.toLowerCase().includes('websocket') || 
           reasonStr.includes('closed without opened') ||
           reasonStr.includes('Failed to fetch') ||
-          reasonStr.includes('NetworkError')
+          reasonStr.includes('NetworkError') ||
+          reasonStr.toLowerCase().includes('timeout')
         ) {
-          // Ignore benign WebSocket / network disconnect rejections
+          // Ignore benign WebSocket / network / query timeout rejections
           return;
         }
 

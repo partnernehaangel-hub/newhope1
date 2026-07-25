@@ -60,12 +60,19 @@ export const loadImageAsPngDataUrl = (url: string | null | undefined): Promise<s
     img.onload = () => {
       try {
         const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth || img.width || 300;
-        canvas.height = img.naturalHeight || img.height || 300;
+        const naturalW = img.naturalWidth || img.width || 300;
+        const naturalH = img.naturalHeight || img.height || 300;
+        // High density scaling (at least 600px dimension) for ultra-sharp print outputs
+        const targetDim = Math.max(600, Math.max(naturalW, naturalH) * 2);
+        const scale = targetDim / Math.max(naturalW, naturalH);
+        canvas.width = Math.round(naturalW * scale);
+        canvas.height = Math.round(naturalH * scale);
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          resolve(canvas.toDataURL('image/png'));
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/png', 1.0));
         } else {
           resolve('');
         }
@@ -278,8 +285,8 @@ export const drawIDCardToPDF = async (
   try {
     const qrDataUrl = await QRCodeLib.toDataURL(idValue, {
       margin: 1,
-      width: 128,
-      errorCorrectionLevel: 'M',
+      width: 512,
+      errorCorrectionLevel: 'H',
     });
     qrPngEmbedded = await embedPngSafe(pdfDoc, qrDataUrl);
   } catch (err) {
@@ -924,6 +931,188 @@ export const downloadBatchIDCardsPDF = async (
   const link = document.createElement('a');
   link.href = blobUrl;
   link.download = `batch-${type}-cards-${schoolProfile.name?.toLowerCase().replace(/\s+/g, '-') || 'school'}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(blobUrl);
+};
+
+/**
+ * Removes duplicate persons based on studentId/staffId or normalized full name + father name.
+ * Guarantees no repeated names or persons are generated or printed.
+ */
+export const getUniquePeople = (people: StudentOrStaff[]): StudentOrStaff[] => {
+  const seen = new Set<string>();
+  const uniqueList: StudentOrStaff[] = [];
+
+  for (const person of people) {
+    if (!person) continue;
+    
+    const rawId = (person.studentId || person.staffId || person.id || '').toString().trim().toLowerCase();
+    const fullName = `${person.name || ''} ${person.surname || ''}`.trim().toLowerCase().replace(/\s+/g, ' ');
+    const fatherName = (person.fatherName || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
+    const dob = (person.dob || person.birthDate || '').toString().trim().toLowerCase();
+
+    // Use ID if distinct, otherwise name + fatherName + dob
+    const uniqueKey = (rawId && rawId !== 'n/a' && rawId !== 'null' && rawId !== 'undefined')
+      ? `id:${rawId}`
+      : `person:${fullName}|father:${fatherName}|dob:${dob}`;
+
+    if (!seen.has(uniqueKey)) {
+      seen.add(uniqueKey);
+      uniqueList.push(person);
+    }
+  }
+
+  return uniqueList;
+};
+
+/**
+ * Generates an A4 sheet PDF with 4 ID cards per page (2x2 grid layout).
+ * Ensures no repeated names or persons are allowed on the sheets.
+ */
+export const downloadA4GridIDCardsPDF = async (
+  people: StudentOrStaff[],
+  type: 'student' | 'teacher' | 'hostel',
+  orientation: 'portrait' | 'landscape',
+  schoolProfile: SchoolProfile,
+  onProgress?: (current: number, total: number, message: string) => void
+) => {
+  // Filter out duplicates (no repeated names/persons)
+  const uniquePeople = getUniquePeople(people);
+
+  if (uniquePeople.length === 0) {
+    throw new Error('No valid unique persons available to generate.');
+  }
+
+  // Step 1: Render individual card pages in a single source PDF document
+  const cardDoc = await PDFDocument.create();
+
+  const helvetica = await cardDoc.embedStandardFont(StandardFonts.Helvetica);
+  const helveticaBold = await cardDoc.embedStandardFont(StandardFonts.HelveticaBold);
+
+  onProgress?.(0, uniquePeople.length, 'Caching school logo and signature...');
+  const logoDataUrl = await loadImageAsPngDataUrl(schoolProfile.logo);
+  const sigDataUrl = await loadImageAsPngDataUrl(schoolProfile.principalSignature);
+
+  const logoPng = await embedPngSafe(cardDoc, logoDataUrl);
+  const sigPng = await embedPngSafe(cardDoc, sigDataUrl);
+
+  const total = uniquePeople.length;
+
+  for (let i = 0; i < total; i++) {
+    const person = uniquePeople[i];
+    onProgress?.(
+      i + 1,
+      total,
+      `Drawing unique vector card ${i + 1} of ${total}: ${person.name || 'Student'} ${person.surname || ''}...`
+    );
+
+    await drawIDCardToPDF(cardDoc, person, type, orientation, schoolProfile, {
+      logoPng,
+      sigPng,
+      helvetica,
+      helveticaBold,
+    });
+  }
+
+  onProgress?.(total, total, 'Arranging 4 cards per A4 page...');
+
+  // Step 2: Create A4 Page Grid Document (595.28 x 841.89 points)
+  const a4Doc = await PDFDocument.create();
+  const cardPages = cardDoc.getPages();
+  const embeddedPages = await a4Doc.embedPages(cardPages);
+
+  const a4Width = 595.28;  // A4 Width in points
+  const a4Height = 841.89; // A4 Height in points
+
+  const cardsPerPage = 4;
+  const totalPages = Math.ceil(embeddedPages.length / cardsPerPage);
+
+  for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+    const a4Page = a4Doc.addPage([a4Width, a4Height]);
+    const startIndex = pageIdx * cardsPerPage;
+    const currentBatch = embeddedPages.slice(startIndex, startIndex + cardsPerPage);
+
+    if (orientation === 'portrait') {
+      // 2 columns x 2 rows of portrait cards
+      const cardW = 245; // pt
+      const cardH = 370; // pt
+      const gapX = (a4Width - (2 * cardW)) / 3; // ~ 35.1 pt
+      const gapY = (a4Height - (2 * cardH)) / 3; // ~ 33.9 pt
+
+      const positions = [
+        { x: gapX, y: a4Height - gapY - cardH },                 // Top Left
+        { x: gapX * 2 + cardW, y: a4Height - gapY - cardH },     // Top Right
+        { x: gapX, y: gapY },                                    // Bottom Left
+        { x: gapX * 2 + cardW, y: gapY },                        // Bottom Right
+      ];
+
+      currentBatch.forEach((embCard, idx) => {
+        const pos = positions[idx];
+
+        // Draw card embedded page
+        a4Page.drawPage(embCard, {
+          x: pos.x,
+          y: pos.y,
+          width: cardW,
+          height: cardH,
+        });
+
+        // Draw clean light border for easy scissor cutting
+        a4Page.drawRectangle({
+          x: pos.x - 0.5,
+          y: pos.y - 0.5,
+          width: cardW + 1,
+          height: cardH + 1,
+          borderColor: rgb(0.80, 0.82, 0.86),
+          borderWidth: 0.5,
+        });
+      });
+    } else {
+      // 2 columns x 2 rows of landscape cards
+      const cardW = 260; // pt
+      const cardH = 164; // pt
+      const gapX = (a4Width - (2 * cardW)) / 3;
+      const gapY = (a4Height - (2 * cardH)) / 3;
+
+      const positions = [
+        { x: gapX, y: a4Height - gapY - cardH - 120 },
+        { x: gapX * 2 + cardW, y: a4Height - gapY - cardH - 120 },
+        { x: gapX, y: gapY + 120 },
+        { x: gapX * 2 + cardW, y: gapY + 120 },
+      ];
+
+      currentBatch.forEach((embCard, idx) => {
+        const pos = positions[idx];
+
+        a4Page.drawPage(embCard, {
+          x: pos.x,
+          y: pos.y,
+          width: cardW,
+          height: cardH,
+        });
+
+        a4Page.drawRectangle({
+          x: pos.x - 0.5,
+          y: pos.y - 0.5,
+          width: cardW + 1,
+          height: cardH + 1,
+          borderColor: rgb(0.80, 0.82, 0.86),
+          borderWidth: 0.5,
+        });
+      });
+    }
+  }
+
+  onProgress?.(total, total, 'Finalizing A4 Sheet PDF...');
+  const pdfBytes = await a4Doc.save();
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const blobUrl = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = `A4-Grid-4Cards-${type}-${uniquePeople.length}-unique-cards.pdf`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

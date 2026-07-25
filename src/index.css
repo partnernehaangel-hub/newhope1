@@ -121,3 +121,74 @@
 .scrollbar-left > * {
   direction: ltr;
 }
+
+/* --- High-Quality Print Optimization --- */
+@media print {
+  @page {
+    margin: 8mm;
+    size: auto;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    -webkit-font-smoothing: antialiased !important;
+    -moz-osx-font-smoothing: grayscale !important;
+  }
+
+  /* Hide non-printable UI elements */
+  nav,
+  aside,
+  header:not(.print-header),
+  footer:not(.print-footer),
+  .no-print,
+  button,
+  .btn-primary,
+  .btn-secondary,
+  .btn-accent,
+  .sidebar,
+  .no-print-area {
+    display: none !important;
+  }
+
+  /* Ensure crisp image and vector graphics printing */
+  img,
+  svg,
+  canvas {
+    max-width: 100% !important;
+    image-rendering: -webkit-optimize-contrast !important;
+    image-rendering: crisp-edges !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Page Break Controls */
+  .page-break-before {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .page-break-after {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .no-page-break,
+  .printable-card,
+  .receipt-card,
+  tr,
+  td,
+  th {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Clear box shadows and backgrounds for clean print output */
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+}
