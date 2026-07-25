@@ -1,0 +1,123 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&family=Roboto:wght@300;400;500&family=JetBrains+Mono:wght@400;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Roboto", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Poppins", "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  
+  --color-primary: #0056b3; /* Blue from logo */
+  --color-primary-hover: #004494;
+  --color-secondary: #4caf50; /* Green from logo */
+  --color-accent: #ff6600; /* Orange from logo */
+  --color-bg-soft: #f8fafc; /* Neutral light blue-gray */
+  --color-text-heading: #0f172a; /* Slate-900 */
+  --color-text-sub: #475569; /* Slate-600 */
+  --color-text-placeholder: #94a3b8; /* Slate-400 */
+
+  --animate-marquee: marquee 60s linear infinite;
+
+  @keyframes marquee {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+  }
+}
+
+@layer utilities {
+  .pause-on-hover:hover {
+    animation-play-state: paused;
+  }
+}
+
+@layer base {
+  body {
+    @apply font-sans text-text-heading bg-bg-soft antialiased overflow-x-hidden;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-bold;
+  }
+}
+
+.glass-panel {
+  @apply bg-white border border-slate-100 shadow-[0_10px_30px_rgba(0,0,0,0.1)];
+}
+
+.login-glass {
+  @apply bg-white/80 border border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.1)];
+}
+
+.btn-primary {
+  @apply bg-[#2F5D9F] hover:bg-[#244A80] text-white px-6 py-2.5 rounded-xl font-medium transition-all active:scale-[0.98] disabled:opacity-50;
+}
+
+.btn-gradient-primary {
+  @apply bg-linear-to-br from-[#2F5D9F] to-[#4A90E2] text-white px-6 py-2.5 rounded-xl font-medium transition-all hover:shadow-lg active:scale-[0.98];
+}
+
+.btn-accent {
+  @apply bg-linear-to-br from-[#F2C94C] to-[#F2994A] text-white px-6 py-3.5 rounded-xl font-bold text-lg shadow-lg shadow-amber-500/20 transition-all hover:shadow-xl active:scale-[0.98];
+}
+
+.input-field {
+  @apply w-full px-4 py-3 rounded-xl border border-[#D1D5DB] focus:border-[#2F5D9F] focus:ring-2 focus:ring-[#2F5D9F]/10 outline-hidden transition-all bg-[#F0F2F5] placeholder:text-[#9CA3AF] text-sm;
+}
+
+.label-text {
+  @apply block text-sm font-medium text-text-sub mb-1.5 ml-1;
+}
+
+.helper-text {
+  @apply text-xs font-light text-text-sub mt-1;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 10px;
+  box-shadow: inset 0 0 5px rgba(0,0,0,0.05);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #ec4899;
+  border-radius: 10px;
+  border: 3px solid #f1f5f9;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #db2777;
+}
+
+/* Ensure scrollbar is always visible in full screen/high res */
+.custom-scrollbar {
+  scrollbar-width: auto;
+  scrollbar-color: #ec4899 #f1f5f9;
+}
+
+.modal-container {
+  @apply bg-white rounded-[2.5rem] shadow-2xl w-full flex flex-col max-h-[90vh] overflow-hidden;
+}
+
+.modal-header {
+  @apply p-8 pb-4 border-b border-slate-100 flex items-center justify-between;
+}
+
+.modal-content {
+  @apply p-8 pt-4 overflow-y-auto flex-1;
+}
+
+.modal-footer {
+  @apply p-8 pt-4 border-t border-slate-100 flex gap-4;
+}
+
+.scrollbar-left {
+  direction: rtl;
+}
+
+.scrollbar-left > * {
+  direction: ltr;
+}

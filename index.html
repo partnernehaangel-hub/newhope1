@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#4f46e5" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <title>Hope English School</title>
+    <script>
+      // Function to report errors back to the server
+      function reportErrorToServer(type, data) {
+        try {
+          fetch('/api/log-error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: type,
+              userAgent: navigator.userAgent,
+              url: window.location.href,
+              error: data,
+              timestamp: new Date().toISOString()
+            })
+          }).catch(() => {});
+        } catch (e) {}
+      }
+
+      // Catch any uncaught runtime errors and display them on screen
+      window.addEventListener('error', function(event) {
+        var errDiv = document.createElement('div');
+        errDiv.id = 'runtime-error-overlay';
+        errDiv.style.position = 'fixed';
+        errDiv.style.top = '0';
+        errDiv.style.left = '0';
+        errDiv.style.width = '100%';
+        errDiv.style.backgroundColor = '#fee2e2';
+        errDiv.style.color = '#991b1b';
+        errDiv.style.padding = '16px';
+        errDiv.style.fontFamily = 'monospace';
+        errDiv.style.fontSize = '14px';
+        errDiv.style.zIndex = '999999';
+        errDiv.style.borderBottom = '4px solid #f87171';
+        errDiv.style.boxSizing = 'border-box';
+        errDiv.style.overflowY = 'auto';
+        errDiv.style.maxHeight = '50%';
+        errDiv.innerHTML = '<strong>Runtime Error:</strong> ' + event.message + '<br><small>at ' + event.filename + ':' + event.lineno + ':' + event.colno + '</small>';
+        document.body.appendChild(errDiv);
+
+        reportErrorToServer('UNCAUGHT_ERROR', {
+          message: event.message,
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno,
+          stack: event.error ? event.error.stack : null
+        });
+      });
+
+      window.addEventListener('unhandledrejection', function(event) {
+        var reasonStr = event.reason ? (event.reason.message || String(event.reason)) : '';
+        if (
+          reasonStr.toLowerCase().includes('websocket') || 
+          reasonStr.includes('closed without opened') ||
+          reasonStr.includes('Failed to fetch') ||
+          reasonStr.includes('NetworkError')
+        ) {
+          // Ignore benign WebSocket / network disconnect rejections
+          return;
+        }
+
+        var errDiv = document.getElementById('unhandled-rejection-overlay');
+        if (!errDiv) {
+          errDiv = document.createElement('div');
+          errDiv.id = 'unhandled-rejection-overlay';
+          errDiv.style.position = 'fixed';
+          errDiv.style.top = '0';
+          errDiv.style.left = '0';
+          errDiv.style.width = '100%';
+          errDiv.style.backgroundColor = '#fee2e2';
+          errDiv.style.color = '#991b1b';
+          errDiv.style.padding = '12px 16px';
+          errDiv.style.fontFamily = 'monospace';
+          errDiv.style.fontSize = '13px';
+          errDiv.style.zIndex = '999999';
+          errDiv.style.borderBottom = '4px solid #f87171';
+          errDiv.style.boxSizing = 'border-box';
+          errDiv.style.overflowY = 'auto';
+          errDiv.style.maxHeight = '50%';
+          errDiv.style.display = 'flex';
+          errDiv.style.justifyContent = 'space-between';
+          errDiv.style.alignItems = 'center';
+          document.body.appendChild(errDiv);
+        }
+        
+        errDiv.innerHTML = '<span><strong>Unhandled Rejection:</strong> ' + reasonStr + '</span><button onclick="this.parentElement.remove()" style="background:#f87171;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;margin-left:12px;font-weight:bold;">✕ Dismiss</button>';
+
+        reportErrorToServer('UNHANDLED_REJECTION', {
+          reason: event.reason ? {
+            message: event.reason.message,
+            stack: event.reason.stack,
+            name: event.reason.name
+          } : 'Unknown'
+        });
+      });
+
+      // Override console.error to capture silent react/runtime rendering failures
+      const originalConsoleError = console.error;
+      console.error = function() {
+        originalConsoleError.apply(console, arguments);
+        const argsArray = Array.from(arguments).map(arg => {
+          if (arg instanceof Error) {
+            return { message: arg.message, stack: arg.stack, name: arg.name };
+          }
+          if (typeof arg === 'object') {
+            try { return JSON.stringify(arg); } catch (e) { return String(arg); }
+          }
+          return String(arg);
+        });
+        reportErrorToServer('CONSOLE_ERROR', { arguments: argsArray });
+      };
+
+      // Global variable to store beforeinstallprompt event
+      window.deferredPrompt = null;
+      
+      window.addEventListener('beforeinstallprompt', (e) => {
+        // Prevent Chrome 67 and earlier from automatically showing the prompt
+        e.preventDefault();
+        // Stash the event so it can be triggered later
+        window.deferredPrompt = e;
+        
+        // Dispatch custom event to notify React app
+        window.dispatchEvent(new CustomEvent('pwa-installable', { detail: true }));
+      });
+
+      // Handle Service Worker and Caching - Clean up unconditionally to break stale caching/lockouts
+      console.log('Force cleaning up service workers and caches to prevent stale bundles...');
+      
+      // Unregister all service workers
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (const registration of registrations) {
+            registration.unregister().then(() => {
+              console.log('Unregistered stale service worker successfully.');
+            });
+          }
+        }).catch((err) => console.warn('Error unregistering service workers:', err));
+      }
+
+      // Clear all caches
+      if ('caches' in window) {
+        caches.keys().then((keys) => {
+          return Promise.all(keys.map(key => {
+            console.log('Clearing stale cache:', key);
+            return caches.delete(key);
+          }));
+        }).then(() => {
+          console.log('All caches cleared successfully.');
+        }).catch((err) => console.warn('Error clearing caches:', err));
+      }
+    </script>
+    <style>
+      .initial-loader-container {
+        position: fixed;
+        inset: 0;
+        background-color: #0f172a;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-family: system-ui, -apple-system, sans-serif;
+        z-index: 9999;
+      }
+      .loader {
+        width: 48px;
+        height: 48px;
+        border: 5px solid #1e293b;
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        display: inline-block;
+        box-sizing: border-box;
+        animation: rotation 1s linear infinite;
+        margin-bottom: 20px;
+      }
+      .loader-text {
+        font-size: 1.25rem;
+        font-weight: 800;
+        letter-spacing: -0.025em;
+        text-transform: uppercase;
+        color: #f1f5f9;
+      }
+      @keyframes rotation {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="initial-loader-container">
+        <span class="loader"></span>
+        <div class="loader-text">Hope English School</div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

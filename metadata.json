@@ -1,0 +1,11 @@
+{
+  "name": "Final New Hope School. ",
+  "description": "A modern, student-friendly school management software powered by Digital Access. Featuring advanced report card management, attendance, and identification modules.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

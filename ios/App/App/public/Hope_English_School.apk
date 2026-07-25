@@ -1,0 +1,21 @@
+HOPE ENGLISH SCHOOL - MOBILE APPLICATION APK
+=============================================
+Package: com.subraimission.app
+Wrapper: Capacitor Native Android Engine v8.0
+Target Platform: Android 10+ (API Level 29+)
+
+This is the direct APK bundle download entry point for the Hope English School system. 
+Upon production compilation on your Windows/Mac build server, replace this informational manifest file with your actual compiled 'app-debug.apk' or 'app-release.apk' binary.
+
+Windows Quick Build Instructions:
+---------------------------------
+1. Make sure Android Studio & Java 17 JDK are installed.
+2. In your project root, run:
+   npm run build
+   npx cap sync
+3. Walk into the android directory and build with Gradle Wrapper:
+   cd android
+   .\gradlew assembleDebug
+4. Retrieve the fully installable APK package at:
+   .\android\app\build\outputs\apk\debug\app-debug.apk
+5. Copy 'app-debug.apk' to your web server's public folder as 'Hope_English_School.apk' to enable instant downloads!
