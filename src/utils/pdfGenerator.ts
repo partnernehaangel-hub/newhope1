@@ -47,14 +47,12 @@ const getProxyImageUrl = (url: string | null | undefined): string => {
 
 /**
  * Loads any image URL (remote, local, proxy, or base64 data URL) and draws it
- * onto an HTML Canvas, converting it to a clean PNG base64 string.
+ * onto an HTML Canvas with a solid white background, converting it to a clean PNG base64 string.
+ * Solid background removes alpha channel issues for CorelDRAW import filters.
  */
 export const loadImageAsPngDataUrl = (url: string | null | undefined): Promise<string> => {
   return new Promise((resolve) => {
     if (!url) return resolve('');
-    if (url.startsWith('data:image/png;base64,')) {
-      return resolve(url);
-    }
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -69,6 +67,9 @@ export const loadImageAsPngDataUrl = (url: string | null | undefined): Promise<s
         canvas.height = Math.round(naturalH * scale);
         const ctx = canvas.getContext('2d');
         if (ctx) {
+          // Fill canvas with solid white background to eliminate transparency issues in CorelDRAW
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -182,16 +183,17 @@ const drawTextFitWidth = (
   page.drawText(text, { x, y, size: fontSize, font, color });
 };
 
-// --- PDF Generation Implementation ---
+// --- PDF Generation Core ---
 
 /**
- * Generates a vector PDF for a single or multiple ID Cards.
- * Standard CR80 Size is 85.60 mm x 53.98 mm.
- * 1 mm = 72 / 25.4 = 2.834645 points.
- * Width = 242.6 points, Height = 153.0 points.
+ * Draws an ID Card directly onto a PDFPage at specific (offsetX, offsetY) coordinates.
+ * Direct page drawing prevents Form XObjects (/XObject /Form), ensuring 100% CorelDRAW compatibility.
  */
-export const drawIDCardToPDF = async (
+export const drawIDCardContentOnPage = async (
+  page: PDFPage,
   pdfDoc: PDFDocument,
+  offsetX: number,
+  offsetY: number,
   person: StudentOrStaff,
   type: 'student' | 'teacher' | 'hostel',
   orientation: 'portrait' | 'landscape',
@@ -207,8 +209,8 @@ export const drawIDCardToPDF = async (
   const pageW = isLandscape ? 242.6 : 153.0;
   const pageH = isLandscape ? 153.0 : 242.6;
 
-  // Add card page
-  const page = pdfDoc.addPage([pageW, pageH]);
+  const rx = (x: number) => offsetX + x;
+  const ry = (y: number) => offsetY + y;
 
   // Embed Fonts if not provided
   const fontRegular = cachedAssets.helvetica || await pdfDoc.embedStandardFont(StandardFonts.Helvetica);
@@ -224,10 +226,10 @@ export const drawIDCardToPDF = async (
   const textGreyColor = rgb(0.38, 0.43, 0.50);
   const textDarkColor = rgb(0.10, 0.14, 0.20);
 
-  // Set background to pure white
+  // Set card background to pure white
   page.drawRectangle({
-    x: 0,
-    y: 0,
+    x: rx(0),
+    y: ry(0),
     width: pageW,
     height: pageH,
     color: whiteColor,
@@ -239,8 +241,8 @@ export const drawIDCardToPDF = async (
 
   // Draw Header background
   page.drawRectangle({
-    x: 0,
-    y: headerY,
+    x: rx(0),
+    y: ry(headerY),
     width: pageW,
     height: headerHeight,
     color: primaryColor,
@@ -248,8 +250,8 @@ export const drawIDCardToPDF = async (
 
   // Draw subtle top header border accent
   page.drawRectangle({
-    x: 0,
-    y: pageH - 2,
+    x: rx(0),
+    y: ry(pageH - 2),
     width: pageW,
     height: 2,
     color: secondaryColor,
@@ -262,15 +264,15 @@ export const drawIDCardToPDF = async (
 
   if (cachedAssets.logoPng) {
     page.drawImage(cachedAssets.logoPng, {
-      x: logoX,
-      y: logoY,
+      x: rx(logoX),
+      y: ry(logoY),
       width: logoSize,
       height: logoSize,
     });
   } else {
     page.drawRectangle({
-      x: logoX,
-      y: logoY,
+      x: rx(logoX),
+      y: ry(logoY),
       width: logoSize,
       height: logoSize,
       color: whiteColor,
@@ -299,14 +301,14 @@ export const drawIDCardToPDF = async (
 
   if (qrPngEmbedded) {
     page.drawImage(qrPngEmbedded, {
-      x: qrX,
-      y: qrY,
+      x: rx(qrX),
+      y: ry(qrY),
       width: qrSize,
       height: qrSize,
     });
     page.drawRectangle({
-      x: qrX,
-      y: qrY,
+      x: rx(qrX),
+      y: ry(qrY),
       width: qrSize,
       height: qrSize,
       borderColor: whiteColor,
@@ -331,8 +333,8 @@ export const drawIDCardToPDF = async (
   drawTextFitWidth(
     page,
     schoolName,
-    textStartX,
-    pageH - 12,
+    rx(textStartX),
+    ry(pageH - 12),
     maxHeaderWidth,
     initialNameSize,
     fontBold,
@@ -346,8 +348,8 @@ export const drawIDCardToPDF = async (
   const addrEndY = drawWrappedText(
     page,
     schoolAddress,
-    textStartX,
-    pageH - 19,
+    rx(textStartX),
+    ry(pageH - 19),
     maxHeaderWidth,
     addrFontSize,
     fontRegular,
@@ -358,7 +360,7 @@ export const drawIDCardToPDF = async (
   // Phone No (dynamically placed below address)
   if (schoolContact) {
     page.drawText(`PH: ${schoolContact}`, {
-      x: textStartX,
+      x: rx(textStartX),
       y: addrEndY - (addrFontSize + 1.5),
       size: isLandscape ? 4.5 : 4.2,
       font: fontBold,
@@ -379,8 +381,8 @@ export const drawIDCardToPDF = async (
 
   // Pill background & border
   page.drawRectangle({
-    x: labelX,
-    y: labelY,
+    x: rx(labelX),
+    y: ry(labelY),
     width: labelW,
     height: labelH,
     color: darkSlate,
@@ -391,8 +393,8 @@ export const drawIDCardToPDF = async (
   // Label text
   const labelTextWidth = fontBold.widthOfTextAtSize(labelText, 4.5);
   page.drawText(labelText, {
-    x: labelX + (labelW - labelTextWidth) / 2,
-    y: labelY + (labelH - 4.5) / 2 + 0.5,
+    x: rx(labelX + (labelW - labelTextWidth) / 2),
+    y: ry(labelY + (labelH - 4.5) / 2 + 0.5),
     size: 4.5,
     font: fontBold,
     color: whiteColor,
@@ -406,8 +408,8 @@ export const drawIDCardToPDF = async (
 
   // Photo border box
   page.drawRectangle({
-    x: photoX,
-    y: photoY,
+    x: rx(photoX),
+    y: ry(photoY),
     width: photoW,
     height: photoH,
     borderColor: borderGreyColor,
@@ -421,8 +423,8 @@ export const drawIDCardToPDF = async (
     const photoPng = await embedPngSafe(pdfDoc, photoDataUrl);
     if (photoPng) {
       page.drawImage(photoPng, {
-        x: photoX + 1,
-        y: photoY + 1,
+        x: rx(photoX + 1),
+        y: ry(photoY + 1),
         width: photoW - 2,
         height: photoH - 2,
       });
@@ -430,15 +432,15 @@ export const drawIDCardToPDF = async (
   } else {
     // Default user outline icons
     page.drawCircle({
-      x: photoX + photoW / 2,
-      y: photoY + photoH / 2 + 4,
+      x: rx(photoX + photoW / 2),
+      y: ry(photoY + photoH / 2 + 4),
       size: 8,
       borderColor: textGreyColor,
       borderWidth: 1,
     });
     page.drawCircle({
-      x: photoX + photoW / 2,
-      y: photoY + photoH / 2 - 16,
+      x: rx(photoX + photoW / 2),
+      y: ry(photoY + photoH / 2 - 16),
       size: 12,
       borderColor: textGreyColor,
       borderWidth: 1,
@@ -462,33 +464,33 @@ export const drawIDCardToPDF = async (
       const val2 = isTeacher ? String(person.staffId || person.id || 'N/A') : String(person.rollNumber !== undefined && person.rollNumber !== null ? person.rollNumber : (person.rollNo !== undefined && person.rollNo !== null ? person.rollNo : 'N/A'));
 
       // Box 1
-      page.drawText(label1, { x: photoX, y: photoY - 6.5, size: 3.8, font: fontBold, color: textGreyColor });
-      page.drawRectangle({ x: photoX, y: photoY - 16.0, width: fieldW, height: fieldH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
-      drawTextFitWidth(page, val1, photoX + 2, photoY - 13.8, fieldW - 4, 4.8, fontBold, textDarkColor);
+      page.drawText(label1, { x: rx(photoX), y: ry(photoY - 6.5), size: 3.8, font: fontBold, color: textGreyColor });
+      page.drawRectangle({ x: rx(photoX), y: ry(photoY - 16.0), width: fieldW, height: fieldH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
+      drawTextFitWidth(page, val1, rx(photoX + 2), ry(photoY - 13.8), fieldW - 4, 4.8, fontBold, textDarkColor);
 
       // Box 2
-      page.drawText(label2, { x: photoX, y: photoY - 22.5, size: 3.8, font: fontBold, color: textGreyColor });
-      page.drawRectangle({ x: photoX, y: photoY - 32.0, width: fieldW, height: fieldH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
-      drawTextFitWidth(page, val2, photoX + 2, photoY - 29.8, fieldW - 4, 4.8, fontBold, textDarkColor);
+      page.drawText(label2, { x: rx(photoX), y: ry(photoY - 22.5), size: 3.8, font: fontBold, color: textGreyColor });
+      page.drawRectangle({ x: rx(photoX), y: ry(photoY - 32.0), width: fieldW, height: fieldH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
+      drawTextFitWidth(page, val2, rx(photoX + 2), ry(photoY - 29.8), fieldW - 4, 4.8, fontBold, textDarkColor);
 
       // Blood Group indicator
       const bloodY = photoY - 42.0;
-      page.drawCircle({ x: photoX + 8, y: bloodY + 2.5, size: 3.0, color: rgb(0.9, 0.15, 0.15) });
-      page.drawText(`BG: ${bloodGroup}`, { x: photoX + 15, y: bloodY, size: 5.2, font: fontBold, color: textDarkColor });
+      page.drawCircle({ x: rx(photoX + 8), y: ry(bloodY + 2.5), size: 3.0, color: rgb(0.9, 0.15, 0.15) });
+      page.drawText(`BG: ${bloodGroup}`, { x: rx(photoX + 15), y: ry(bloodY), size: 5.2, font: fontBold, color: textDarkColor });
     } else {
       // Hostel Card Quick Fields
       const fieldW = 44;
       const fieldH = 8.5;
       
-      page.drawText('ROOM / BED', { x: photoX, y: photoY - 6.5, size: 3.8, font: fontBold, color: textGreyColor });
-      page.drawRectangle({ x: photoX, y: photoY - 16.0, width: fieldW, height: fieldH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
+      page.drawText('ROOM / BED', { x: rx(photoX), y: ry(photoY - 6.5), size: 3.8, font: fontBold, color: textGreyColor });
+      page.drawRectangle({ x: rx(photoX), y: ry(photoY - 16.0), width: fieldW, height: fieldH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
       const roomVal = person.class ? `RM-${person.class}` : 'H-402';
-      drawTextFitWidth(page, roomVal, photoX + 2, photoY - 13.8, fieldW - 4, 4.8, fontBold, rgb(0.1, 0.6, 0.3));
+      drawTextFitWidth(page, roomVal, rx(photoX + 2), ry(photoY - 13.8), fieldW - 4, 4.8, fontBold, rgb(0.1, 0.6, 0.3));
 
       // Blood Group
       const bloodY = photoY - 26.0;
-      page.drawCircle({ x: photoX + 8, y: bloodY + 2.5, size: 3.0, color: rgb(0.9, 0.15, 0.15) });
-      page.drawText(`BG: ${bloodGroup}`, { x: photoX + 15, y: bloodY, size: 5.2, font: fontBold, color: textDarkColor });
+      page.drawCircle({ x: rx(photoX + 8), y: ry(bloodY + 2.5), size: 3.0, color: rgb(0.9, 0.15, 0.15) });
+      page.drawText(`BG: ${bloodGroup}`, { x: rx(photoX + 15), y: ry(bloodY), size: 5.2, font: fontBold, color: textDarkColor });
     }
 
     // 2. Right Side Details (Portrait)
@@ -497,12 +499,12 @@ export const drawIDCardToPDF = async (
     const fullName = `${person.name || ''} ${person.surname || ''}`.trim().toUpperCase();
 
     // Student Name
-    drawTextFitWidth(page, fullName, rightX, headerY - 15, rightW, 8.0, fontBold, primaryColor, 5.0);
+    drawTextFitWidth(page, fullName, rx(rightX), ry(headerY - 15), rightW, 8.0, fontBold, primaryColor, 5.0);
 
     // Accent Underline
     page.drawRectangle({
-      x: rightX,
-      y: headerY - 18,
+      x: rx(rightX),
+      y: ry(headerY - 18),
       width: 16,
       height: 1.2,
       color: secondaryColor,
@@ -533,8 +535,8 @@ export const drawIDCardToPDF = async (
     details.forEach((item) => {
       // Draw Label
       page.drawText(item.label, {
-        x: rightX,
-        y: currentY,
+        x: rx(rightX),
+        y: ry(currentY),
         size: 3.8,
         font: fontBold,
         color: textGreyColor,
@@ -548,8 +550,8 @@ export const drawIDCardToPDF = async (
 
         // Container box
         page.drawRectangle({
-          x: rightX,
-          y: boxY,
+          x: rx(rightX),
+          y: ry(boxY),
           width: rightW,
           height: boxH,
           color: lightBgColor,
@@ -560,8 +562,8 @@ export const drawIDCardToPDF = async (
         drawWrappedText(
           page,
           item.value.toUpperCase(),
-          rightX + 3,
-          currentY - 8.0,
+          rx(rightX + 3),
+          ry(currentY - 8.0),
           rightW - 6,
           4.8,
           fontRegular,
@@ -575,8 +577,8 @@ export const drawIDCardToPDF = async (
 
         // Container box
         page.drawRectangle({
-          x: rightX,
-          y: boxY,
+          x: rx(rightX),
+          y: ry(boxY),
           width: rightW,
           height: boxH,
           color: lightBgColor,
@@ -587,8 +589,8 @@ export const drawIDCardToPDF = async (
         drawTextFitWidth(
           page,
           item.value.toUpperCase(),
-          rightX + 3,
-          currentY - 9.8,
+          rx(rightX + 3),
+          ry(currentY - 9.8),
           rightW - 6,
           4.8,
           fontBold,
@@ -613,31 +615,31 @@ export const drawIDCardToPDF = async (
       const subH = 8.0;
 
       // Box 1
-      page.drawText(label1, { x: photoX, y: photoY - 5.5, size: 3.5, font: fontBold, color: textGreyColor });
-      page.drawRectangle({ x: photoX, y: photoY - 14.5, width: subW, height: subH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
-      drawTextFitWidth(page, val1, photoX + 1, photoY - 12.5, subW - 2, 4.5, fontBold, textDarkColor);
+      page.drawText(label1, { x: rx(photoX), y: ry(photoY - 5.5), size: 3.5, font: fontBold, color: textGreyColor });
+      page.drawRectangle({ x: rx(photoX), y: ry(photoY - 14.5), width: subW, height: subH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
+      drawTextFitWidth(page, val1, rx(photoX + 1), ry(photoY - 12.5), subW - 2, 4.5, fontBold, textDarkColor);
 
       // Box 2
-      page.drawText(label2, { x: photoX + 23, y: photoY - 5.5, size: 3.5, font: fontBold, color: textGreyColor });
-      page.drawRectangle({ x: photoX + 23, y: photoY - 14.5, width: subW, height: subH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
-      drawTextFitWidth(page, val2, photoX + 24, photoY - 12.5, subW - 2, 4.5, fontBold, textDarkColor);
+      page.drawText(label2, { x: rx(photoX + 23), y: ry(photoY - 5.5), size: 3.5, font: fontBold, color: textGreyColor });
+      page.drawRectangle({ x: rx(photoX + 23), y: ry(photoY - 14.5), width: subW, height: subH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
+      drawTextFitWidth(page, val2, rx(photoX + 24), ry(photoY - 12.5), subW - 2, 4.5, fontBold, textDarkColor);
 
       // Blood group
       const bloodY = photoY - 21.5;
-      page.drawCircle({ x: photoX + 8, y: bloodY + 2.0, size: 3.0, color: rgb(0.9, 0.15, 0.15) });
-      page.drawText(`BG: ${bloodGroup}`, { x: photoX + 15, y: bloodY, size: 5.2, font: fontBold, color: textDarkColor });
+      page.drawCircle({ x: rx(photoX + 8), y: ry(bloodY + 2.0), size: 3.0, color: rgb(0.9, 0.15, 0.15) });
+      page.drawText(`BG: ${bloodGroup}`, { x: rx(photoX + 15), y: ry(bloodY), size: 5.2, font: fontBold, color: textDarkColor });
     } else {
       // Hostel Card Bed info
       const subW = 44;
       const subH = 8.0;
-      page.drawText('ROOM / BED', { x: photoX, y: photoY - 5.5, size: 3.5, font: fontBold, color: textGreyColor });
-      page.drawRectangle({ x: photoX, y: photoY - 14.5, width: subW, height: subH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
+      page.drawText('ROOM / BED', { x: rx(photoX), y: ry(photoY - 5.5), size: 3.5, font: fontBold, color: textGreyColor });
+      page.drawRectangle({ x: rx(photoX), y: ry(photoY - 14.5), width: subW, height: subH, color: lightBgColor, borderColor: borderGreyColor, borderWidth: 0.5 });
       const roomVal = person.class ? `RM-${person.class}` : 'H-402';
-      drawTextFitWidth(page, roomVal, photoX + 2, photoY - 12.5, subW - 4, 4.5, fontBold, rgb(0.1, 0.6, 0.3));
+      drawTextFitWidth(page, roomVal, rx(photoX + 2), ry(photoY - 12.5), subW - 4, 4.5, fontBold, rgb(0.1, 0.6, 0.3));
 
       const bloodY = photoY - 21.5;
-      page.drawCircle({ x: photoX + 8, y: bloodY + 2.0, size: 3.0, color: rgb(0.9, 0.15, 0.15) });
-      page.drawText(`BG: ${bloodGroup}`, { x: photoX + 15, y: bloodY, size: 5.2, font: fontBold, color: textDarkColor });
+      page.drawCircle({ x: rx(photoX + 8), y: ry(bloodY + 2.0), size: 3.0, color: rgb(0.9, 0.15, 0.15) });
+      page.drawText(`BG: ${bloodGroup}`, { x: rx(photoX + 15), y: ry(bloodY), size: 5.2, font: fontBold, color: textDarkColor });
     }
 
     // 2. Right Side Details (Landscape Grid Layout)
@@ -646,12 +648,12 @@ export const drawIDCardToPDF = async (
     const fullName = `${person.name || ''} ${person.surname || ''}`.trim().toUpperCase();
 
     // Student Name
-    drawTextFitWidth(page, fullName, rightX, headerY - 11, rightW, 8.5, fontBold, primaryColor, 5.0);
+    drawTextFitWidth(page, fullName, rx(rightX), ry(headerY - 11), rightW, 8.5, fontBold, primaryColor, 5.0);
 
     // Accent line
     page.drawRectangle({
-      x: rightX,
-      y: headerY - 13.5,
+      x: rx(rightX),
+      y: ry(headerY - 13.5),
       width: 16,
       height: 1.2,
       color: secondaryColor,
@@ -686,10 +688,10 @@ export const drawIDCardToPDF = async (
     details.forEach((item, idx) => {
       if (item.label === 'ADDRESS') {
         const addrY = isTeacher ? headerY - 38 : headerY - 56;
-        page.drawText('ADDRESS', { x: col1X, y: addrY, size: 3.5, font: fontBold, color: textGreyColor });
+        page.drawText('ADDRESS', { x: rx(col1X), y: ry(addrY), size: 3.5, font: fontBold, color: textGreyColor });
         page.drawRectangle({
-          x: col1X,
-          y: addrY - 17.0,
+          x: rx(col1X),
+          y: ry(addrY - 17.0),
           width: rightW,
           height: 14.5,
           color: lightBgColor,
@@ -700,8 +702,8 @@ export const drawIDCardToPDF = async (
         drawWrappedText(
           page,
           item.value.toUpperCase(),
-          col1X + 3,
-          addrY - 6.0,
+          rx(col1X + 3),
+          ry(addrY - 6.0),
           rightW - 6,
           4.8,
           fontRegular,
@@ -714,10 +716,10 @@ export const drawIDCardToPDF = async (
         const itemX = isCol1 ? col1X : col2X;
         const itemY = headerY - 21.0 - (rowIdx * 17.5);
 
-        page.drawText(item.label, { x: itemX, y: itemY, size: 3.5, font: fontBold, color: textGreyColor });
+        page.drawText(item.label, { x: rx(itemX), y: ry(itemY), size: 3.5, font: fontBold, color: textGreyColor });
         page.drawRectangle({
-          x: itemX,
-          y: itemY - 9.5,
+          x: rx(itemX),
+          y: ry(itemY - 9.5),
           width: itemW,
           height: itemH,
           color: lightBgColor,
@@ -727,8 +729,8 @@ export const drawIDCardToPDF = async (
         drawTextFitWidth(
           page,
           item.value.toUpperCase(),
-          itemX + 3,
-          itemY - 7.5,
+          rx(itemX + 3),
+          ry(itemY - 7.5),
           itemW - 6,
           4.8,
           fontBold,
@@ -751,15 +753,15 @@ export const drawIDCardToPDF = async (
 
   if (cachedAssets.logoPng) {
     page.drawImage(cachedAssets.logoPng, {
-      x: botLogoX,
-      y: botLogoY,
+      x: rx(botLogoX),
+      y: ry(botLogoY),
       width: botLogoSize,
       height: botLogoSize,
     });
   } else {
     page.drawRectangle({
-      x: botLogoX,
-      y: botLogoY,
+      x: rx(botLogoX),
+      y: ry(botLogoY),
       width: botLogoSize,
       height: botLogoSize,
       color: lightBgColor,
@@ -770,15 +772,15 @@ export const drawIDCardToPDF = async (
 
   // "Official Credential" labels
   page.drawText('OFFICIAL', {
-    x: botLogoX + botLogoSize + 3,
-    y: botLogoY + 4,
+    x: rx(botLogoX + botLogoSize + 3),
+    y: ry(botLogoY + 4),
     size: 3.5,
     font: fontBold,
     color: textGreyColor,
   });
   page.drawText('CREDENTIAL', {
-    x: botLogoX + botLogoSize + 3,
-    y: botLogoY,
+    x: rx(botLogoX + botLogoSize + 3),
+    y: ry(botLogoY),
     size: 3.5,
     font: fontBold,
     color: textDarkColor,
@@ -787,8 +789,8 @@ export const drawIDCardToPDF = async (
   // Principal Sign Label
   const sigLabelX = pageW - 42;
   page.drawText('PRINCIPAL SIGN', {
-    x: sigLabelX,
-    y: sigY,
+    x: rx(sigLabelX),
+    y: ry(sigY),
     size: 3.5,
     font: fontBold,
     color: textGreyColor,
@@ -797,15 +799,15 @@ export const drawIDCardToPDF = async (
   // Embed Principal Signature image
   if (cachedAssets.sigPng) {
     page.drawImage(cachedAssets.sigPng, {
-      x: sigLabelX,
-      y: sigY + 3.5,
+      x: rx(sigLabelX),
+      y: ry(sigY + 3.5),
       width: 25,
       height: 7,
     });
   } else {
     page.drawLine({
-      start: { x: sigLabelX, y: sigY + 4.5 },
-      end: { x: sigLabelX + 25, y: sigY + 4.5 },
+      start: { x: rx(sigLabelX), y: ry(sigY + 4.5) },
+      end: { x: rx(sigLabelX + 25), y: ry(sigY + 4.5) },
       color: borderGreyColor,
       thickness: 0.5,
     });
@@ -813,8 +815,8 @@ export const drawIDCardToPDF = async (
 
   // Bottom Footer Bar
   page.drawRectangle({
-    x: 0,
-    y: 0,
+    x: rx(0),
+    y: ry(0),
     width: pageW,
     height: footerH,
     color: primaryColor,
@@ -823,8 +825,8 @@ export const drawIDCardToPDF = async (
   const sessionText = `ACADEMIC YEAR: ${schoolProfile.currentSession || '2023-24'}`;
   const sessionTextWidth = fontBold.widthOfTextAtSize(sessionText, 4.0);
   page.drawText(sessionText, {
-    x: (pageW - sessionTextWidth) / 2,
-    y: (footerH - 4.0) / 2 + 0.5,
+    x: rx((pageW - sessionTextWidth) / 2),
+    y: ry((footerH - 4.0) / 2 + 0.5),
     size: 4.0,
     font: fontBold,
     color: whiteColor,
@@ -832,7 +834,42 @@ export const drawIDCardToPDF = async (
 };
 
 /**
+ * Draws a single ID card to a single page in pdfDoc.
+ */
+export const drawIDCardToPDF = async (
+  pdfDoc: PDFDocument,
+  person: StudentOrStaff,
+  type: 'student' | 'teacher' | 'hostel',
+  orientation: 'portrait' | 'landscape',
+  schoolProfile: SchoolProfile,
+  cachedAssets: {
+    logoPng?: any;
+    sigPng?: any;
+    helvetica?: PDFFont;
+    helveticaBold?: PDFFont;
+  }
+) => {
+  const isLandscape = orientation === 'landscape';
+  const pageW = isLandscape ? 242.6 : 153.0;
+  const pageH = isLandscape ? 153.0 : 242.6;
+
+  const page = pdfDoc.addPage([pageW, pageH]);
+  await drawIDCardContentOnPage(
+    page,
+    pdfDoc,
+    0,
+    0,
+    person,
+    type,
+    orientation,
+    schoolProfile,
+    cachedAssets
+  );
+};
+
+/**
  * Downloads a completed high-fidelity vector PDF for a single ID Card.
+ * Disables Object Streams ({ useObjectStreams: false }) for full CorelDRAW compatibility.
  */
 export const downloadIDCardPDF = async (
   person: StudentOrStaff,
@@ -865,8 +902,8 @@ export const downloadIDCardPDF = async (
     helveticaBold,
   });
 
-  onProgress?.('Finalizing and compiling document...');
-  const pdfBytes = await pdfDoc.save();
+  onProgress?.('Finalizing CorelDRAW-compatible PDF document...');
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
   const blob = new Blob([pdfBytes], { type: 'application/pdf' });
   const blobUrl = URL.createObjectURL(blob);
 
@@ -881,8 +918,7 @@ export const downloadIDCardPDF = async (
 
 /**
  * Batch generates a single combined PDF for multiple students/staff (one page per card).
- * Incredibly performant & memory-optimized because we reuse the embedded school logo, 
- * principal signature, and standard font templates across hundreds of pages!
+ * Disables Object Streams ({ useObjectStreams: false }) for full CorelDRAW compatibility.
  */
 export const downloadBatchIDCardsPDF = async (
   people: StudentOrStaff[],
@@ -923,8 +959,8 @@ export const downloadBatchIDCardsPDF = async (
     });
   }
 
-  onProgress?.(total, total, 'Compiling and downloading batch PDF...');
-  const pdfBytes = await pdfDoc.save();
+  onProgress?.(total, total, 'Compiling CorelDRAW-compatible batch PDF...');
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
   const blob = new Blob([pdfBytes], { type: 'application/pdf' });
   const blobUrl = URL.createObjectURL(blob);
 
@@ -969,7 +1005,8 @@ export const getUniquePeople = (people: StudentOrStaff[]): StudentOrStaff[] => {
 
 /**
  * Generates an A4 sheet PDF with 4 ID cards per page (2x2 grid layout).
- * Ensures no repeated names or persons are allowed on the sheets.
+ * Draws cards directly onto the page vectors (no Form XObjects) and disables Object Streams ({ useObjectStreams: false })
+ * so the output PDF opens 100% seamlessly in CorelDRAW ("coral"), Illustrator, Acrobat, and print shop software.
  */
 export const downloadA4GridIDCardsPDF = async (
   people: StudentOrStaff[],
@@ -985,128 +1022,87 @@ export const downloadA4GridIDCardsPDF = async (
     throw new Error('No valid unique persons available to generate.');
   }
 
-  // Step 1: Render individual card pages in a single source PDF document
-  const cardDoc = await PDFDocument.create();
+  const a4Doc = await PDFDocument.create();
 
-  const helvetica = await cardDoc.embedStandardFont(StandardFonts.Helvetica);
-  const helveticaBold = await cardDoc.embedStandardFont(StandardFonts.HelveticaBold);
+  const helvetica = await a4Doc.embedStandardFont(StandardFonts.Helvetica);
+  const helveticaBold = await a4Doc.embedStandardFont(StandardFonts.HelveticaBold);
 
   onProgress?.(0, uniquePeople.length, 'Caching school logo and signature...');
   const logoDataUrl = await loadImageAsPngDataUrl(schoolProfile.logo);
   const sigDataUrl = await loadImageAsPngDataUrl(schoolProfile.principalSignature);
 
-  const logoPng = await embedPngSafe(cardDoc, logoDataUrl);
-  const sigPng = await embedPngSafe(cardDoc, sigDataUrl);
-
-  const total = uniquePeople.length;
-
-  for (let i = 0; i < total; i++) {
-    const person = uniquePeople[i];
-    onProgress?.(
-      i + 1,
-      total,
-      `Drawing unique vector card ${i + 1} of ${total}: ${person.name || 'Student'} ${person.surname || ''}...`
-    );
-
-    await drawIDCardToPDF(cardDoc, person, type, orientation, schoolProfile, {
-      logoPng,
-      sigPng,
-      helvetica,
-      helveticaBold,
-    });
-  }
-
-  onProgress?.(total, total, 'Arranging 4 cards per A4 page...');
-
-  // Step 2: Create A4 Page Grid Document (595.28 x 841.89 points)
-  const a4Doc = await PDFDocument.create();
-  const cardPages = cardDoc.getPages();
-  const embeddedPages = await a4Doc.embedPages(cardPages);
+  const logoPng = await embedPngSafe(a4Doc, logoDataUrl);
+  const sigPng = await embedPngSafe(a4Doc, sigDataUrl);
 
   const a4Width = 595.28;  // A4 Width in points
   const a4Height = 841.89; // A4 Height in points
 
+  const isLandscape = orientation === 'landscape';
+  const cardW = isLandscape ? 242.6 : 153.0;
+  const cardH = isLandscape ? 153.0 : 242.6;
+
+  // Even Grid positioning
+  const gapX = (a4Width - 2 * cardW) / 3;
+  const gapY = (a4Height - 2 * cardH) / 3;
+
+  const positions = [
+    { x: gapX, y: a4Height - gapY - cardH },              // Top Left
+    { x: gapX * 2 + cardW, y: a4Height - gapY - cardH },  // Top Right
+    { x: gapX, y: gapY },                                 // Bottom Left
+    { x: gapX * 2 + cardW, y: gapY },                     // Bottom Right
+  ];
+
   const cardsPerPage = 4;
-  const totalPages = Math.ceil(embeddedPages.length / cardsPerPage);
+  const total = uniquePeople.length;
+  const totalPages = Math.ceil(total / cardsPerPage);
 
   for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
     const a4Page = a4Doc.addPage([a4Width, a4Height]);
     const startIndex = pageIdx * cardsPerPage;
-    const currentBatch = embeddedPages.slice(startIndex, startIndex + cardsPerPage);
+    const currentBatch = uniquePeople.slice(startIndex, startIndex + cardsPerPage);
 
-    if (orientation === 'portrait') {
-      // 2 columns x 2 rows of portrait cards
-      const cardW = 245; // pt
-      const cardH = 370; // pt
-      const gapX = (a4Width - (2 * cardW)) / 3; // ~ 35.1 pt
-      const gapY = (a4Height - (2 * cardH)) / 3; // ~ 33.9 pt
+    for (let cIdx = 0; cIdx < currentBatch.length; cIdx++) {
+      const person = currentBatch[cIdx];
+      const pos = positions[cIdx];
+      const personIndex = startIndex + cIdx;
 
-      const positions = [
-        { x: gapX, y: a4Height - gapY - cardH },                 // Top Left
-        { x: gapX * 2 + cardW, y: a4Height - gapY - cardH },     // Top Right
-        { x: gapX, y: gapY },                                    // Bottom Left
-        { x: gapX * 2 + cardW, y: gapY },                        // Bottom Right
-      ];
+      onProgress?.(
+        personIndex + 1,
+        total,
+        `Drawing vector card ${personIndex + 1} of ${total} on A4 sheet: ${person.name || 'Student'} ${person.surname || ''}...`
+      );
 
-      currentBatch.forEach((embCard, idx) => {
-        const pos = positions[idx];
+      await drawIDCardContentOnPage(
+        a4Page,
+        a4Doc,
+        pos.x,
+        pos.y,
+        person,
+        type,
+        orientation,
+        schoolProfile,
+        {
+          logoPng,
+          sigPng,
+          helvetica,
+          helveticaBold,
+        }
+      );
 
-        // Draw card embedded page
-        a4Page.drawPage(embCard, {
-          x: pos.x,
-          y: pos.y,
-          width: cardW,
-          height: cardH,
-        });
-
-        // Draw clean light border for easy scissor cutting
-        a4Page.drawRectangle({
-          x: pos.x - 0.5,
-          y: pos.y - 0.5,
-          width: cardW + 1,
-          height: cardH + 1,
-          borderColor: rgb(0.80, 0.82, 0.86),
-          borderWidth: 0.5,
-        });
-      });
-    } else {
-      // 2 columns x 2 rows of landscape cards
-      const cardW = 260; // pt
-      const cardH = 164; // pt
-      const gapX = (a4Width - (2 * cardW)) / 3;
-      const gapY = (a4Height - (2 * cardH)) / 3;
-
-      const positions = [
-        { x: gapX, y: a4Height - gapY - cardH - 120 },
-        { x: gapX * 2 + cardW, y: a4Height - gapY - cardH - 120 },
-        { x: gapX, y: gapY + 120 },
-        { x: gapX * 2 + cardW, y: gapY + 120 },
-      ];
-
-      currentBatch.forEach((embCard, idx) => {
-        const pos = positions[idx];
-
-        a4Page.drawPage(embCard, {
-          x: pos.x,
-          y: pos.y,
-          width: cardW,
-          height: cardH,
-        });
-
-        a4Page.drawRectangle({
-          x: pos.x - 0.5,
-          y: pos.y - 0.5,
-          width: cardW + 1,
-          height: cardH + 1,
-          borderColor: rgb(0.80, 0.82, 0.86),
-          borderWidth: 0.5,
-        });
+      // Draw subtle light cutting line around each card for scissors/guillotine
+      a4Page.drawRectangle({
+        x: pos.x - 0.5,
+        y: pos.y - 0.5,
+        width: cardW + 1,
+        height: cardH + 1,
+        borderColor: rgb(0.80, 0.82, 0.86),
+        borderWidth: 0.5,
       });
     }
   }
 
-  onProgress?.(total, total, 'Finalizing A4 Sheet PDF...');
-  const pdfBytes = await a4Doc.save();
+  onProgress?.(total, total, 'Finalizing CorelDRAW-compatible A4 Sheet PDF...');
+  const pdfBytes = await a4Doc.save({ useObjectStreams: false });
   const blob = new Blob([pdfBytes], { type: 'application/pdf' });
   const blobUrl = URL.createObjectURL(blob);
 

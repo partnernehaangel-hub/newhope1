@@ -629,13 +629,16 @@ whatsappRouter.post("/logout", async (req, res) => {
 
   if (sock) {
     try {
-      await sock.logout();
+      await Promise.race([
+        sock.logout().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 1000))
+      ]);
     } catch (e: any) {
-      console.warn("[Baileys] Socket logout exception (maybe already closed):", e.message);
-      try {
-        sock.end(undefined);
-      } catch (err) {}
+      console.warn("[Baileys] Socket logout exception (maybe already closed):", e?.message);
     }
+    try {
+      sock.end(undefined);
+    } catch (err) {}
     sock = null;
   }
 
@@ -701,10 +704,16 @@ whatsappRouter.post("/disconnect", async (req, res) => {
 
   if (sock) {
     try {
-      await sock.logout();
+      await Promise.race([
+        sock.logout().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 1000))
+      ]);
     } catch (e: any) {
-      try { sock.end(undefined); } catch (err) {}
+      console.warn("[Baileys] Socket disconnect exception:", e?.message);
     }
+    try {
+      sock.end(undefined);
+    } catch (err) {}
     sock = null;
   }
 

@@ -1916,6 +1916,20 @@ const Card = ({ children, className = "", ...props }: { children: React.ReactNod
   );
 };
 
+const openWhatsAppLink = (phone: string, text: string) => {
+  const cleanMobile = (phone || '').replace(/\D/g, '');
+  const formattedPhone = cleanMobile ? (cleanMobile.length === 10 ? '91' + cleanMobile : cleanMobile) : '';
+  const encodedText = encodeURIComponent(text);
+  
+  // Directly open WhatsApp Web send URL which uses browser local session storage
+  // Once logged in once with 'Stay logged in on this browser', WhatsApp Web will open immediately without asking to log in again
+  const webUrl = formattedPhone 
+    ? `https://web.whatsapp.com/send?phone=${formattedPhone}&text=${encodedText}`
+    : `https://web.whatsapp.com/send?text=${encodedText}`;
+    
+  window.open(webUrl, '_blank');
+};
+
 const shareAttendanceOnWhatsApp = async (student: any, record: any, schoolProfile?: any) => {
   if (!student) return;
   const mobile = student.fatherMobile || student.motherMobile || student.emergencyContact;
@@ -1946,9 +1960,7 @@ const shareAttendanceOnWhatsApp = async (student: any, record: any, schoolProfil
     console.error("[WhatsApp Attendance Send] Failed, falling back to manual link:", e);
   }
 
-  const encodedMessage = encodeURIComponent(message);
-  const whatsappUrl = `https://wa.me/${cleanMobile.length === 10 ? '91' + cleanMobile : cleanMobile}?text=${encodedMessage}`;
-  window.open(whatsappUrl, '_blank');
+  openWhatsAppLink(cleanMobile, message);
 };
 
 const shareReportCardOnWhatsApp = async (student: any, reportCard: any, schoolProfile?: any) => {
@@ -1981,9 +1993,7 @@ const shareReportCardOnWhatsApp = async (student: any, reportCard: any, schoolPr
     console.error("[WhatsApp Report Card Send] Failed, falling back to manual link:", e);
   }
 
-  const encodedMessage = encodeURIComponent(message);
-  const whatsappUrl = `https://wa.me/${cleanMobile.length === 10 ? '91' + cleanMobile : cleanMobile}?text=${encodedMessage}`;
-  window.open(whatsappUrl, '_blank');
+  openWhatsAppLink(cleanMobile, message);
 };
 
 const shareFeeOnWhatsApp = async (t: any, students: Student[], schoolProfile: any) => {
@@ -2020,8 +2030,7 @@ const shareFeeOnWhatsApp = async (t: any, students: Student[], schoolProfile: an
       console.error("[WhatsApp Fee Send] Failed, falling back to manual link:", e);
     }
 
-    const url = `https://wa.me/${cleanMobile.length === 10 ? '91' + cleanMobile : cleanMobile}?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
+    openWhatsAppLink(cleanMobile, text);
 };
 
 const formatDate = (date: Date | string) => {
@@ -6238,7 +6247,7 @@ const Academics = ({
                             <button 
                               onClick={() => {
                                 const text = `*Syllabus: ${s.class}*\nSubject: ${s.subject}\nTitle: ${s.title}\n\n${s.description}`;
-                                window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                                openWhatsAppLink('', text);
                               }}
                               className="p-1.5 text-green-500 hover:bg-green-50 rounded-lg transition-all"
                               title="Share on WhatsApp"
@@ -6402,7 +6411,7 @@ const Academics = ({
                             <button 
                               onClick={() => {
                                 const text = `*Homework: ${h.class}-${h.section}*\nSubject: ${h.subject}\nTitle: ${h.title}\nDue Date: ${h.dueDate}\n\n${h.description}`;
-                                window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                                openWhatsAppLink('', text);
                               }}
                               className="p-1.5 text-green-500 hover:bg-green-50 rounded-lg transition-all"
                               title="Share Homework"
@@ -9112,7 +9121,7 @@ const FeeManagement = ({
                             filteredTransactions.map(t => 
                               `• ${t.date} | ${t.studentName} | ₹${t.totalPaid} (${t.feeType})`
                             ).join('\n');
-                          window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                          openWhatsAppLink('', text);
                         }}
                         className="flex items-center gap-2 bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-600 transition-all shadow-md"
                       >
@@ -14672,29 +14681,23 @@ const CommunicatePanel = ({ notifications, setNotifications, notices, setNotices
     const cleanMobile = recipientMobile.replace(/\D/g, '');
     
     if (isWhatsAppConnected) {
-      if (confirm("WhatsApp is linked to this software. Send this message automatically in the background?")) {
-        try {
-          const res = await fetch("/api/whatsapp/send-message", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ phone: cleanMobile, message: messageBody })
-          });
-          const data = await res.json();
-          if (data.success) {
-            alert("Message sent successfully via the ERP WhatsApp Gateway!");
-            return;
-          } else {
-            alert("Failed to send automatically: " + data.error + ". Falling back to manual WhatsApp...");
-          }
-        } catch (e: any) {
-          console.error(e);
-          alert("Error sending automatically. Falling back to manual WhatsApp...");
+      try {
+        const res = await fetch("/api/whatsapp/send-message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: cleanMobile, message: messageBody })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert("Message sent successfully via WhatsApp Gateway!");
+          return;
         }
+      } catch (e: any) {
+        console.error("WhatsApp Gateway auto-send error:", e);
       }
     }
     
-    const url = `https://wa.me/${cleanMobile.length === 10 ? '91' + cleanMobile : cleanMobile}?text=${encodeURIComponent(messageBody)}`;
-    window.open(url, '_blank');
+    openWhatsAppLink(cleanMobile, messageBody);
   };
 
   const handleAddNotice = async () => {

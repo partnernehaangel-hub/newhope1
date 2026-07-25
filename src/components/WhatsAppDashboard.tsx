@@ -102,16 +102,9 @@ export const WhatsAppDashboard = ({ schoolProfile, supabase }: any) => {
 
   useEffect(() => {
     const initAndAutoConnect = async () => {
-      const current = await fetchStatus();
+      await fetchStatus();
       await fetchMetaConfig();
       await fetchStudents();
-      
-      if (current && current.status === "Disconnected" && current.mode !== "Meta") {
-        console.log("[WhatsApp Dashboard] Auto-connecting disconnected instance...");
-        fetch("/api/whatsapp/connect", { method: "POST" })
-          .then(() => fetchStatus())
-          .catch(e => console.error(e));
-      }
     };
     initAndAutoConnect();
     const interval = setInterval(fetchStatus, 3000); // Poll status every 3 seconds
@@ -153,7 +146,7 @@ export const WhatsAppDashboard = ({ schoolProfile, supabase }: any) => {
   };
 
   const handleDisconnect = async () => {
-    if (!confirm("Are you sure you want to disconnect WhatsApp and clear the saved session?")) return;
+    if (!confirm("Are you sure you want to disconnect WhatsApp service and clear the saved session?")) return;
     setLoading(true);
     try {
       const res = await fetch("/api/whatsapp/disconnect", { method: "POST" });
@@ -163,8 +156,18 @@ export const WhatsAppDashboard = ({ schoolProfile, supabase }: any) => {
       } else {
         await fetchStatus();
       }
+      alert("WhatsApp service has been disconnected and session credentials cleared successfully.");
     } catch (err) {
-      console.error(err);
+      console.error("Disconnect error:", err);
+      // Fallback try logout route
+      try {
+        const res2 = await fetch("/api/whatsapp/logout", { method: "POST" });
+        const data2 = await res2.json();
+        if (data2.state) setConnection(data2.state);
+        alert("WhatsApp service disconnected.");
+      } catch (err2) {
+        alert("Unable to disconnect service. Please check network connection.");
+      }
     } finally {
       setLoading(false);
     }
@@ -353,47 +356,61 @@ export const WhatsAppDashboard = ({ schoolProfile, supabase }: any) => {
         <div className="mb-6 pb-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-100 inline-block mb-1">
-              Meta ERP Integration Hub
+              Meta & WhatsApp Web ERP Hub
             </span>
             <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
               WhatsApp Communication Center
             </h1>
           </div>
 
-          {/* Mode Switcher Tabs */}
-          <div className="bg-slate-100 p-1 rounded-2xl flex gap-1 border border-slate-200 self-start md:self-auto">
-            <button
-              onClick={() => handleSwitchMode("Sandbox")}
-              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                connection.mode === "Sandbox" 
-                  ? "bg-amber-600 text-white shadow-sm" 
-                  : "text-slate-500 hover:text-slate-800"
-              }`}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Direct WhatsApp Web Link Button */}
+            <a
+              href="https://web.whatsapp.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+              title="Open https://web.whatsapp.com/ in new tab"
             >
-              <Sparkles size={12} />
-              Sandbox
-            </button>
-            <button
-              onClick={() => handleSwitchMode("Meta")}
-              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                connection.mode === "Meta" 
-                  ? "bg-emerald-600 text-white shadow-sm" 
-                  : "text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              <Shield size={12} />
-              Meta Cloud API
-            </button>
-            <button
-              onClick={() => handleSwitchMode("Real")}
-              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                connection.mode === "Real" 
-                  ? "bg-white text-slate-800 shadow-sm border border-slate-200/50" 
-                  : "text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              Real Device (QR)
-            </button>
+              <ArrowUpRight size={14} />
+              Open WhatsApp Web
+            </a>
+
+            {/* Mode Switcher Tabs */}
+            <div className="bg-slate-100 p-1 rounded-2xl flex gap-1 border border-slate-200 self-start md:self-auto">
+              <button
+                onClick={() => handleSwitchMode("Sandbox")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  connection.mode === "Sandbox" 
+                    ? "bg-amber-600 text-white shadow-sm" 
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <Sparkles size={12} />
+                Sandbox
+              </button>
+              <button
+                onClick={() => handleSwitchMode("Meta")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  connection.mode === "Meta" 
+                    ? "bg-emerald-600 text-white shadow-sm" 
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <Shield size={12} />
+                Meta Cloud API
+              </button>
+              <button
+                onClick={() => handleSwitchMode("Real")}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  connection.mode === "Real" 
+                    ? "bg-white text-slate-800 shadow-sm border border-slate-200/50" 
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                Real Device (QR)
+              </button>
+            </div>
           </div>
         </div>
 
@@ -570,23 +587,31 @@ export const WhatsAppDashboard = ({ schoolProfile, supabase }: any) => {
                   
                   <div className="md:col-span-7 space-y-4 text-left">
                     <h3 className="text-xl font-extrabold text-slate-800">
-                      {connection.mode === "Meta" ? "Configure Meta API Credentials" : "Authorize Server Connection"}
+                      {connection.mode === "Meta" ? "Configure Meta API Credentials" : "WhatsApp Web QR Code Login Connection"}
                     </h3>
                     <p className="text-slate-500 text-xs leading-relaxed">
                       {connection.mode === "Meta"
                         ? "Your Meta Business Gateway requires credentials. Navigate to the next tab to save your secure access token, and once configured, this indicator will turn green."
-                        : "Generate and pair an authorization token. Link this browser workspace to allow bulk reports and documents."
+                        : "Scan the QR code with your phone's WhatsApp application to activate WhatsApp Web connection. Once connected, fee reminders, receipts, and notifications can be sent automatically from the ERP software."
                       }
                     </p>
 
-                    <div className="space-y-2 text-xs font-medium text-slate-600">
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center font-bold text-[10px]">1</span>
-                        <span>Select the preferred connection channel top right.</span>
+                    <div className="space-y-2.5 text-xs font-medium text-slate-600 bg-emerald-50/50 p-4 rounded-2xl border border-emerald-100">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">1</span>
+                        <span>Open WhatsApp on your phone or visit <a href="https://web.whatsapp.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-700 font-bold underline hover:text-emerald-800">web.whatsapp.com</a></span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center font-bold text-[10px]">2</span>
-                        <span>{connection.mode === "Meta" ? "Save token parameters in Credentials Config." : "Scan the QR code displayed with your smartphone."}</span>
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">2</span>
+                        <span>Tap <strong>Menu (⋮)</strong> or <strong>Settings</strong> and select <strong>Linked Devices</strong></span>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">3</span>
+                        <span>Tap <strong>Link a Device</strong> & point your phone camera at the QR code on the right</span>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shrink-0">4</span>
+                        <span>Software connects automatically! Automated fee reminders & notifications can now be sent.</span>
                       </div>
                     </div>
                   </div>
@@ -837,10 +862,45 @@ export const WhatsAppDashboard = ({ schoolProfile, supabase }: any) => {
                     </p>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      Message Content Template
-                    </label>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        Message Content Template
+                      </label>
+                      <span className="text-[10px] font-bold text-emerald-600">Quick Templates:</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => setBulkTemplate("Dear Parent,\nThis is a friendly fee reminder regarding pending dues for your ward {name} ({roll}) of class {class}.\nOutstanding Balance: ₹{due}.\n\nPlease clear the dues at your earliest convenience.")}
+                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-[10px] font-bold cursor-pointer"
+                      >
+                        🔔 Fee Reminder
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkTemplate("Dear Parent,\nThank you for the fee payment of ₹{due} received for your ward {name} of class {class}.\nTransaction Status: CONFIRMED.\n\nThank you for your cooperation.")}
+                        className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-bold cursor-pointer"
+                      >
+                        💳 Fee Receipt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkTemplate("Dear Parent,\nDaily Attendance Update for your ward {name} ({roll}) of class {class}.\nStatus: PRESENT for today's sessions.")}
+                        className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 rounded-lg text-[10px] font-bold cursor-pointer"
+                      >
+                        📅 Attendance
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkTemplate("Dear Parent,\nImportant Notification from School:\nSchool will remain closed tomorrow for scheduled maintenance. Classes resume as usual on Monday.")}
+                        className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 rounded-lg text-[10px] font-bold cursor-pointer"
+                      >
+                        📢 General Notice
+                      </button>
+                    </div>
+
                     <textarea
                       rows={5}
                       value={bulkTemplate}
