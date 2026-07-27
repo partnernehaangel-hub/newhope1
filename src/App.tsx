@@ -565,6 +565,101 @@ const parseBulkStudents = (input: string, mode: 'auto' | 'excel' | 'double' | 'j
   return result;
 };
 
+const getInitialDefaultStudents = (): Student[] => {
+  try {
+    const parsed = parseBulkStudents(TRANSCRIBED_STUDENTS_TSV, 'auto', '2025-26');
+    if (parsed && parsed.length > 0) {
+      return parsed.map((s: any, idx: number) => ({
+        id: `std-transcribed-${idx + 1}`,
+        studentId: s.studentId || `STD-${String(idx + 1).padStart(3, '0')}`,
+        title: 'Mr.',
+        name: s.name || '',
+        surname: s.surname || '',
+        studentType: (s.studentType === 'New' || s.studentType === 'NEW' ? 'New' : 'Old') as 'New' | 'Old',
+        session: '2025-26',
+        class: s.class || 'Class 1',
+        section: s.section || 'A',
+        rollNumber: s.rollNumber || String(idx + 1),
+        caste: '',
+        category: 'General',
+        religion: 'Hinduism',
+        gender: 'Male',
+        dob: s.dob || '2019-01-01',
+        bloodGroup: s.bloodGroup || 'O+',
+        email: '',
+        aadhaarNumber: '',
+        panNumber: '',
+        passportNumber: '',
+        fatherName: s.fatherName || '',
+        motherName: s.motherName || '',
+        fatherMobile: s.fatherMobile || '',
+        motherMobile: '',
+        fatherIncome: '',
+        fatherSourceOfIncome: '',
+        motherIncome: '',
+        motherSourceOfIncome: '',
+        address: s.address || '',
+        residentialAddress: s.address || '',
+        emergencyContact: '',
+        localGuardianContact: '',
+        allergy: '',
+        hasDisability: false,
+        disabilityDetails: '',
+        admissionDate: '2023-04-01',
+        photo: '',
+        relationsInSchool: [],
+        documents: []
+      }));
+    }
+  } catch (e) {
+    console.error('Failed to parse initial default students:', e);
+  }
+  return [];
+};
+
+const autoSeedStudentsInSupabase = async (client: any, currentSession: string) => {
+  if (!client) return;
+  try {
+    const defaultStudents = getInitialDefaultStudents();
+    if (!defaultStudents || defaultStudents.length === 0) return;
+
+    const { data: existing, error: checkErr } = await client.from('students').select('id').limit(1);
+    if (!checkErr && existing && existing.length > 0) return;
+
+    console.log(`Auto-seeding ${defaultStudents.length} default students into Supabase...`);
+    const missing = (window as any)._missing_student_cols || new Set();
+
+    for (let i = 0; i < defaultStudents.length; i += 15) {
+      const batch = defaultStudents.slice(i, i + 15).map((s: any) => {
+        const payload: any = {
+          first_name: s.name,
+          surname: s.surname,
+          student_type: s.studentType,
+          academic_session: currentSession || '2025-26',
+          class_name: s.class,
+          section_name: s.section,
+          roll_number: s.rollNumber,
+          date_of_birth: s.dob || null,
+          father_name: s.fatherName,
+          mother_name: s.motherName,
+          father_mobile: s.fatherMobile,
+          blood_group: s.bloodGroup,
+          residential_address: s.residentialAddress || s.address,
+          student_id: s.studentId,
+          admission_date: s.admissionDate || '2023-04-01'
+        };
+        missing.forEach((col: string) => delete payload[col]);
+        return payload;
+      });
+
+      await client.from('students').insert(batch);
+    }
+    console.log('Finished auto-seeding default students to database.');
+  } catch (err) {
+    console.warn('Auto-seed students note:', err);
+  }
+};
+
 interface User {
   id: string;
   name: string;
@@ -17795,7 +17890,7 @@ const schoolMigrations = `
     
     return Math.max(0, totalDue - settledAmount);
   };
-  const [students, setStudents] = useState<Student[]>([]);
+  const [students, setStudents] = useState<Student[]>(() => getInitialDefaultStudents());
   useEffect(() => {
       }, [students]);
 
@@ -17833,10 +17928,9 @@ const schoolMigrations = `
     ]
   });
 
+  // Do not force student filter to current session by default so all students remain visible in directory
   useEffect(() => {
-    if (schoolProfile?.currentSession) {
-      setStudentFilterSession(schoolProfile.currentSession);
-    }
+    // Keep studentFilterSession as '' (All Sessions) by default
   }, [schoolProfile?.currentSession]);
 
   const [studentSearchQuery, setStudentSearchQuery] = useState<string>('');
@@ -18162,48 +18256,55 @@ const schoolMigrations = `
       }
 
       // 9. Process Students
-      const studentsData = studentsRes.data;
-      if (studentsData) {
+      const studentsData = studentsRes?.data;
+      if (studentsData && Array.isArray(studentsData) && studentsData.length > 0) {
         setStudents(studentsData.map((s: any) => ({
           id: s.id,
-          studentId: s.student_id,
-          title: s.title,
-          name: s.first_name,
-          surname: s.surname,
-          studentType: s.student_type,
-          session: s.academic_session,
-          class: s.class_name,
-          section: s.section_name,
-          rollNumber: s.roll_number,
-          caste: s.caste,
-          category: s.category,
-          religion: s.religion,
-          gender: s.gender,
-          dob: s.date_of_birth,
-          bloodGroup: s.blood_group,
-          email: s.email,
-          aadhaarNumber: s.aadhaar_number,
-          panNumber: s.pan_number,
-          passportNumber: s.passport_number,
-          fatherName: s.father_name,
-          motherName: s.mother_name,
-          fatherMobile: s.father_mobile,
-          motherMobile: s.mother_mobile,
-          fatherIncome: s.father_income,
-          fatherSourceOfIncome: s.father_source_of_income,
-          motherIncome: s.mother_income,
-          motherSourceOfIncome: s.mother_source_of_income,
-          address: s.residential_address,
-          emergencyContact: s.emergency_contact,
-          localGuardianContact: s.local_guardian_contact,
-          allergy: s.allergies,
+          studentId: s.student_id || s.id,
+          title: s.title || 'Mr.',
+          name: s.first_name || s.name || '',
+          surname: s.surname || '',
+          studentType: (s.student_type === 'New' || s.student_type === 'NEW' ? 'New' : 'Old') as 'New' | 'Old',
+          session: s.academic_session || s.session || '2025-26',
+          class: s.class_name || s.class || '',
+          section: s.section_name || s.section || 'A',
+          rollNumber: s.roll_number || s.rollNumber || '',
+          caste: s.caste || '',
+          category: s.category || '',
+          religion: s.religion || '',
+          gender: s.gender || '',
+          dob: s.date_of_birth || s.dob || '',
+          bloodGroup: s.blood_group || s.bloodGroup || '',
+          email: s.email || '',
+          aadhaarNumber: s.aadhaar_number || '',
+          panNumber: s.pan_number || '',
+          passportNumber: s.passport_number || '',
+          fatherName: s.father_name || s.fatherName || '',
+          motherName: s.mother_name || s.motherName || '',
+          fatherMobile: s.father_mobile || s.fatherMobile || '',
+          motherMobile: s.mother_mobile || '',
+          fatherIncome: s.father_income || '',
+          fatherSourceOfIncome: s.father_source_of_income || '',
+          motherIncome: s.mother_income || '',
+          motherSourceOfIncome: s.mother_source_of_income || '',
+          address: s.residential_address || s.address || '',
+          residentialAddress: s.residential_address || s.address || '',
+          emergencyContact: s.emergency_contact || '',
+          localGuardianContact: s.local_guardian_contact || '',
+          allergy: s.allergies || '',
           hasDisability: s.disability === 'Yes',
           disabilityDetails: s.disability_details || '',
-          admissionDate: s.admission_date,
-          photo: s.photo_url,
+          admissionDate: s.admission_date || '',
+          photo: s.photo_url || s.photo || '',
           relationsInSchool: s.relations || [],
           documents: s.documents || []
         })));
+      } else {
+        const defaultStudents = getInitialDefaultStudents();
+        setStudents(prev => prev.length > 0 ? prev : defaultStudents);
+        if (supabase) {
+          autoSeedStudentsInSupabase(supabase, schoolProfile?.currentSession || '2025-26');
+        }
       }
 
       // 10. Process Fee Data
@@ -21359,40 +21460,47 @@ const schoolMigrations = `
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
-                        {sortStudentsList(
-                          students.filter(s => {
-                            const name = s.name || '';
+                        {(() => {
+                          const filterFn = (s: any) => {
+                            const name = s.name || s.first_name || '';
                             const surname = s.surname || '';
-                            const studentId = s.studentId || '';
-                            const matchesSearch = (name + ' ' + surname + ' ' + studentId).toLowerCase().includes((studentSearchQuery || '').toLowerCase());
-                            const matchesClass = !studentFilterClass || s.class === studentFilterClass;
-                            const matchesSection = !studentFilterSection || s.section === studentFilterSection;
-                            const matchesType = !studentFilterType || s.studentType === studentFilterType;
-                            const matchesSession = !studentFilterSession || s.session === studentFilterSession;
+                            const studentId = s.studentId || s.student_id || '';
+                            const fatherName = s.fatherName || s.father_name || '';
+                            const rollNumber = s.rollNumber || s.roll_number || '';
+                            const searchLower = (studentSearchQuery || '').trim().toLowerCase();
+                            
+                            const matchesSearch = !searchLower || (name + ' ' + surname + ' ' + studentId + ' ' + fatherName + ' ' + rollNumber).toLowerCase().includes(searchLower);
+                            
+                            const sClassNorm = (s.class || s.class_name || '').toString().toLowerCase().trim();
+                            const fClassNorm = (studentFilterClass || '').toString().toLowerCase().trim();
+                            const matchesClass = !studentFilterClass || sClassNorm === fClassNorm || sClassNorm.includes(fClassNorm);
+                            
+                            const sSectionNorm = (s.section || s.section_name || '').toString().toLowerCase().trim();
+                            const fSectionNorm = (studentFilterSection || '').toString().toLowerCase().trim();
+                            const matchesSection = !studentFilterSection || sSectionNorm === fSectionNorm;
+                            
+                            const sTypeNorm = (s.studentType || s.student_type || 'Old').toString().toLowerCase().trim();
+                            const fTypeNorm = (studentFilterType || '').toString().toLowerCase().trim();
+                            const matchesType = !studentFilterType || sTypeNorm === fTypeNorm || (fTypeNorm === 'old' && (sTypeNorm === 'old' || !s.studentType));
+                            
+                            const sSession = (s.session || s.academic_session || '').toString().trim();
+                            const matchesSession = !studentFilterSession || sSession === studentFilterSession || !sSession;
+                            
                             return matchesSearch && matchesClass && matchesSection && matchesType && matchesSession;
-                          }),
-                          masterData.classes
-                        ).length === 0 ? (
-                          <tr>
-                            <td colSpan={9} className="py-12 text-center text-text-secondary italic">
-                              No students found. Start by registering a new student.
-                            </td>
-                          </tr>
-                        ) : (
-                          sortStudentsList(
-                            students.filter(s => {
-                              const name = s.name || '';
-                              const surname = s.surname || '';
-                              const studentId = s.studentId || '';
-                              const matchesSearch = (name + ' ' + surname + ' ' + studentId).toLowerCase().includes((studentSearchQuery || '').toLowerCase());
-                              const matchesClass = !studentFilterClass || s.class === studentFilterClass;
-                              const matchesSection = !studentFilterSection || s.section === studentFilterSection;
-                              const matchesType = !studentFilterType || s.studentType === studentFilterType;
-                              const matchesSession = !studentFilterSession || s.session === studentFilterSession;
-                              return matchesSearch && matchesClass && matchesSection && matchesType && matchesSession;
-                            }),
-                            masterData.classes
-                          ).map((s) => (
+                          };
+                          const filteredList = sortStudentsList(students.filter(filterFn), masterData.classes);
+
+                          if (filteredList.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={9} className="py-12 text-center text-text-secondary italic">
+                                  No students found matching current filters. Try setting Session to "All Sessions" or resetting filters.
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return filteredList.map((s) => (
                             <tr key={s.id} className="text-[11px] sm:text-sm hover:bg-slate-50/50 transition-all">
                               <td className="py-4 font-mono text-xs text-primary font-bold">{s.studentId}</td>
                               <td className="py-4 font-bold text-slate-600">{s.rollNumber || '-'}</td>
@@ -21528,8 +21636,8 @@ const schoolMigrations = `
                                 </div>
                               </td>
                             </tr>
-                          ))
-                        )}
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
